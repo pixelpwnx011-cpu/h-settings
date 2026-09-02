@@ -1,16 +1,18 @@
 package com.geneo.hiddensettings
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.UserManager
 import android.provider.Settings
 import android.view.LayoutInflater
-import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.geneo.hiddensettings.databinding.ActivityMainBinding
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 /**
  * A shortcut launcher straight into specific Android system settings screens, for
@@ -35,6 +37,8 @@ class MainActivity : AppCompatActivity() {
         binding.btnQuickClock.setOnClickListener { binding.etPackageName.setText("com.geneo.clockoverlay") }
         binding.btnQuickTools.setOnClickListener { binding.etPackageName.setText("com.geneo.classroomtools") }
         binding.btnQuickBooks.setOnClickListener { binding.etPackageName.setText("com.geneo.ncertbooks") }
+
+        binding.btnCheckRestrictions.setOnClickListener { checkDeviceRestrictions() }
 
         binding.btnAppInfo.setOnClickListener {
             withPackage { pkg ->
@@ -68,6 +72,53 @@ class MainActivity : AppCompatActivity() {
             return
         }
         action(pkg)
+    }
+
+    // Human-readable descriptions for the restriction flags most relevant to
+    // diagnosing an overlay/kiosk-mode problem. Any OTHER restriction the OS
+    // reports gets shown too (by its raw key), just without a description --
+    // this isn't a hardcoded allowlist, it's a lookup table for nicer wording.
+    private val restrictionDescriptions = mapOf(
+        UserManager.DISALLOW_CREATE_WINDOWS to "Blocks apps from creating overlay windows -- this is the one that would directly explain 'Display over other apps' being blocked or reset.",
+        UserManager.DISALLOW_INSTALL_APPS to "Blocks installing new apps.",
+        UserManager.DISALLOW_UNINSTALL_APPS to "Blocks uninstalling apps.",
+        UserManager.DISALLOW_DEBUGGING_FEATURES to "Blocks USB debugging / developer options.",
+        UserManager.DISALLOW_FACTORY_RESET to "Blocks factory reset from Settings.",
+        UserManager.DISALLOW_SAFE_BOOT to "Blocks booting into Android's safe mode.",
+        UserManager.DISALLOW_CONFIG_VPN to "Blocks VPN configuration.",
+        UserManager.DISALLOW_APPS_CONTROL to "Blocks changing app settings (force stop, clear data, etc.) for other apps.",
+        UserManager.DISALLOW_MOUNT_PHYSICAL_MEDIA to "Blocks mounting USB drives / physical media -- would affect the pendrive features in other Geneo apps.",
+        UserManager.DISALLOW_USB_FILE_TRANSFER to "Blocks USB file transfer.",
+        UserManager.DISALLOW_CONFIG_DATE_TIME to "Blocks changing date & time settings.",
+        UserManager.DISALLOW_ADD_USER to "Blocks adding new user profiles.",
+        UserManager.DISALLOW_SET_WALLPAPER to "Blocks changing the wallpaper.",
+    )
+
+    /** Reads Android's standard user-restriction flags -- available to any app,
+     *  no special permission needed, since these are policy facts about the
+     *  current user/profile rather than another app's private data. This is the
+     *  most a regular sideloaded app can find out about device management
+     *  without being the managing app itself: it can see WHICH restrictions are
+     *  active, but not WHO set them (that's deliberately hidden by Android). */
+    private fun checkDeviceRestrictions() {
+        val userManager = getSystemService(Context.USER_SERVICE) as UserManager
+        val restrictions: Bundle = userManager.userRestrictions
+        val activeKeys = restrictions.keySet().filter { restrictions.getBoolean(it, false) }
+
+        val message = if (activeKeys.isEmpty()) {
+            "No standard Android device-restriction flags are active on this profile.\n\nIf overlay permission is still being blocked or reset, it's likely enforced some other way -- a vendor-specific security layer that doesn't go through this standard Android API -- rather than a normal Android device-management policy."
+        } else {
+            activeKeys.joinToString("\n\n") { key ->
+                val desc = restrictionDescriptions[key]
+                if (desc != null) "• $key\n$desc" else "• $key\n(active, but no description available for this one)"
+            }
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(if (activeKeys.isEmpty()) "No restrictions found" else "${activeKeys.size} restriction(s) active")
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun buildShortcutList() {
